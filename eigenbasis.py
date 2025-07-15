@@ -235,3 +235,58 @@ def generate_harmonic_basis(complex, dim=2):
         harmonic_fields[:, :, i] = edge2vec(complex, harmonics_forms[:, i], dim)
 
     return harmonic_fields
+
+
+def generate_scalar_basis(vertices, simplices, boundary=None, flat=False, tolerance=1e-10,
+                          depth=None):
+    complex = pydec.SimplicialComplex((vertices, simplices))
+
+    complex.construct_hodge()
+
+    L = complex[0].d.T @ complex[1].star @ complex[0].d
+
+    if depth is None:
+        depth = len(complex.vertices) - 2
+
+    if not flat:
+        eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(A=L, M=complex[0].star,
+                                                              k=depth,
+                                                              sigma=0,
+                                                              mode='normal',
+                                                              tol=tolerance,
+                                                              ncv=min(4 * depth, L.shape[0] - 1)
+                                                              )
+    else:
+        if boundary is None:
+            eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(A=L,
+                                                                  k=depth,
+                                                                  sigma=0,
+                                                                  mode='normal',
+                                                                  tol=tolerance,
+                                                                  ncv=min(4 * depth, L.shape[0] - 1)
+                                                                  )
+        else:
+            interior_vertices = np.full(L.shape[0], True)
+            interior_vertices[boundary] = False
+
+            # Extract interior submatrix
+            L_ii = L[np.ix_(interior_vertices, interior_vertices)]
+
+            # Recompute eigenvectors with Dirichlet zero boundary condition
+            eigenvalues, eigvecs_int = scipy.sparse.linalg.eigsh(A=L_ii,
+                                                                 k=depth,
+                                                                 sigma=0,
+                                                                 mode='normal',
+                                                                 tol=tolerance,
+                                                                 ncv=min(4 * depth, L.shape[0] - 1)
+                                                                 )
+
+            # Assemble full eigenvectors with zero at boundary
+            eigenvectors = np.zeros((L.shape[0], depth))
+            eigenvectors[interior_vertices, :] = eigvecs_int
+
+    eigenvalues[abs(eigenvalues) < tolerance] = 0
+
+    vol = np.sum(complex[-1].primal_volume)
+
+    return eigenvalues, eigenvectors, vol, complex
