@@ -135,8 +135,6 @@ def generate_vector_basis(vertices=None, simplices=None, complex=None, boundary=
     c_tri_vecs = np.transpose(c_tri_vecs, (1, 0, 2))
 
     tri_normals_expanded = np.repeat(tri_normals[:, None, :], depth, axis=1)
-    # if dim < 3:
-    #     tri_normals_expanded = np.pad(tri_normals_expanded, ((0, 0), (0, 0), (0, 3 - dim)))
 
     rot_tri_vecs = np.cross(c_tri_vecs, tri_normals_expanded)[..., :dim]
 
@@ -218,12 +216,12 @@ def generate_harmonic_basis(complex, dim=2):
 
     eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(A=hodge_laplacian, M=complex[1].star,
                                                           k=depth,
-                                                          sigma=0,  # Target eigenvalues near 0
-                                                          mode='normal',  # (L - σI)^-1
-                                                          tol=tolerance,  # Match your later zeroing threshold
+                                                          sigma=0,
+                                                          mode='normal',
+                                                          tol=tolerance,
                                                           ncv=min(4 * depth, hodge_laplacian.shape[0] - 1),
                                                           # More Lanczos vectors
-                                                          maxiter=5000  # Allow more iterations if needed
+                                                          maxiter=5000
                                                           )
 
     harmonics_forms = eigenvectors[:, eigenvalues < tolerance]
