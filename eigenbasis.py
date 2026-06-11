@@ -16,12 +16,26 @@ def generate_vector_basis(vertices=None, simplices=None, complex=None, boundary=
 
     L = complex[0].d.T @ complex[1].star @ complex[0].d
 
+    def create_barycentric_mass_matrix(complex):
+        n_vertices = len(complex.vertices)
+        triangles = complex[-1].simplices  # (n_triangles, 3)
+        triangle_areas = complex[-1].primal_volume  # (n_triangles,)
+
+        # Sum 1/3 of each triangle's area to its vertices
+        vertex_areas = np.zeros(n_vertices)
+        for tri_idx, (v0, v1, v2) in enumerate(triangles):
+            area = triangle_areas[tri_idx]
+            vertex_areas[[v0, v1, v2]] += area / 3
+
+        return vertex_areas
+
     if depth is None:
         depth = len(complex.vertices) - 2
 
     # on flat domains we do not require the inclusion of the metric via the mass matrix
     if not flat:
-        eigenvalues, d_eigenvectors = scipy.sparse.linalg.eigsh(A=L, M=complex[0].star,
+        M0 = scipy.sparse.diags(create_barycentric_mass_matrix(complex)).tocsr()
+        eigenvalues, d_eigenvectors = scipy.sparse.linalg.eigsh(A=L, M=M0,
                                                                 k=depth,
                                                                 sigma=0,
                                                                 mode='normal',
