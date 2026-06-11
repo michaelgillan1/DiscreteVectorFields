@@ -16,12 +16,26 @@ def generate_vector_basis(vertices=None, simplices=None, complex=None, boundary=
 
     L = complex[0].d.T @ complex[1].star @ complex[0].d
 
+    def create_barycentric_mass_matrix(complex):
+        n_vertices = len(complex.vertices)
+        triangles = complex[-1].simplices  # (n_triangles, 3)
+        triangle_areas = complex[-1].primal_volume  # (n_triangles,)
+
+        # Sum 1/3 of each triangle's area to its vertices
+        vertex_areas = np.zeros(n_vertices)
+        for tri_idx, (v0, v1, v2) in enumerate(triangles):
+            area = triangle_areas[tri_idx]
+            vertex_areas[[v0, v1, v2]] += area / 3
+
+        return vertex_areas
+
     if depth is None:
         depth = len(complex.vertices) - 2
 
     # on flat domains we do not require the inclusion of the metric via the mass matrix
     if not flat:
-        eigenvalues, d_eigenvectors = scipy.sparse.linalg.eigsh(A=L, M=complex[0].star,
+        M0 = scipy.sparse.diags(create_barycentric_mass_matrix(complex)).tocsr()
+        eigenvalues, d_eigenvectors = scipy.sparse.linalg.eigsh(A=L, M=M0,
                                                                 k=depth,
                                                                 sigma=0,
                                                                 mode='normal',
@@ -135,6 +149,8 @@ def generate_vector_basis(vertices=None, simplices=None, complex=None, boundary=
     c_tri_vecs = np.transpose(c_tri_vecs, (1, 0, 2))
 
     tri_normals_expanded = np.repeat(tri_normals[:, None, :], depth, axis=1)
+    # if dim < 3:
+    #     tri_normals_expanded = np.pad(tri_normals_expanded, ((0, 0), (0, 0), (0, 3 - dim)))
 
     rot_tri_vecs = np.cross(c_tri_vecs, tri_normals_expanded)[..., :dim]
 
@@ -216,12 +232,12 @@ def generate_harmonic_basis(complex, dim=2):
 
     eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(A=hodge_laplacian, M=complex[1].star,
                                                           k=depth,
-                                                          sigma=0,
-                                                          mode='normal',
-                                                          tol=tolerance,
+                                                          sigma=0,  # Target eigenvalues near 0
+                                                          mode='normal',  # (L - σI)^-1
+                                                          tol=tolerance,  # Match your later zeroing threshold
                                                           ncv=min(4 * depth, hodge_laplacian.shape[0] - 1),
                                                           # More Lanczos vectors
-                                                          maxiter=5000
+                                                          maxiter=5000  # Allow more iterations if needed
                                                           )
 
     harmonics_forms = eigenvectors[:, eigenvalues < tolerance]
@@ -233,3 +249,58 @@ def generate_harmonic_basis(complex, dim=2):
         harmonic_fields[:, :, i] = edge2vec(complex, harmonics_forms[:, i], dim)
 
     return harmonic_fields
+
+
+def generate_scalar_basis(vertices, simplices, boundary=None, flat=False, tolerance=1e-10,
+                          depth=None):
+    complex = pydec.SimplicialComplex((vertices, simplices))
+
+    complex.construct_hodge()
+
+    L = complex[0].d.T @ complex[1].star @ complex[0].d
+
+    if depth is None:
+        depth = len(complex.vertices) - 2
+
+    if not flat:
+        eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(A=L, M=complex[0].star,
+                                                              k=depth,
+                                                              sigma=0,
+                                                              mode='normal',
+                                                              tol=tolerance,
+                                                              ncv=min(4 * depth, L.shape[0] - 1)
+                                                              )
+    else:
+        if boundary is None:
+            eigenvalues, eigenvectors = scipy.sparse.linalg.eigsh(A=L,
+                                                                  k=depth,
+                                                                  sigma=0,
+                                                                  mode='normal',
+                                                                  tol=tolerance,
+                                                                  ncv=min(4 * depth, L.shape[0] - 1)
+                                                                  )
+        else:
+            interior_vertices = np.full(L.shape[0], True)
+            interior_vertices[boundary] = False
+
+            # Extract interior submatrix
+            L_ii = L[np.ix_(interior_vertices, interior_vertices)]
+
+            # Recompute eigenvectors with Dirichlet zero boundary condition
+            eigenvalues, eigvecs_int = scipy.sparse.linalg.eigsh(A=L_ii,
+                                                                 k=depth,
+                                                                 sigma=0,
+                                                                 mode='normal',
+                                                                 tol=tolerance,
+                                                                 ncv=min(4 * depth, L.shape[0] - 1)
+                                                                 )
+
+            # Assemble full eigenvectors with zero at boundary
+            eigenvectors = np.zeros((L.shape[0], depth))
+            eigenvectors[interior_vertices, :] = eigvecs_int
+
+    eigenvalues[abs(eigenvalues) < tolerance] = 0
+
+    vol = np.sum(complex[-1].primal_volume)
+
+    return eigenvalues, eigenvectors, vol, complex
